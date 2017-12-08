@@ -4,9 +4,49 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogSpaceNav3DController, Log, All);
 
-#if PLATFORM_WINDOWS
-
 class FSpaceNav3DController;
+
+// Platform-common
+class FSpaceNav3DControllerBase : public IInputDevice {
+public:
+	FSpaceNav3DControllerBase(const TSharedRef< FGenericApplicationMessageHandler >& InMessageHandler)
+	: MessageHandler(InMessageHandler)
+	{
+		FMemory::Memzero(&ControllerState, sizeof(ControllerState));
+		FMemory::Memzero(&PrevControllerState, sizeof(PrevControllerState));
+		
+		TSharedPtr<GenericApplication> GenericApplication = FSlateApplication::Get().GetPlatformApplication();
+	}
+	
+	struct F3DState {
+		float LeftAnalogX;
+		float LeftAnalogY;
+		float RightAnalogX;
+		float RightAnalogY;
+		float LeftTriggerAnalog;
+		float RightTriggerAnalog;
+		float RollAnalog;
+		int cmd;
+		// 3D connexion SDK buttons, 0 = none
+		int   button_pressed;
+		int   button_released;
+	} ControllerState, PrevControllerState;
+	
+	/** handler to send all messages to */
+	TSharedRef<FGenericApplicationMessageHandler> MessageHandler;
+
+	virtual void SetMessageHandler(const TSharedRef< FGenericApplicationMessageHandler >& InMessageHandler) override
+	{
+		MessageHandler = InMessageHandler;
+	}
+	
+	// Unused but mandatory IInputDevice methods
+	virtual bool Exec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar) override { return false; }
+	virtual void SetChannelValue(int32 ControllerId, FForceFeedbackChannelType ChannelType, float Value) override {}
+	virtual void SetChannelValues(int32 ControllerId, const FForceFeedbackValues &values) override {}
+};
+
+#if PLATFORM_WINDOWS
 
 class FSpaceNav3DMessageHandler
 	: public IWindowsMessageHandler
@@ -21,7 +61,7 @@ class FSpaceNav3DController : public IInputDevice
 public:
 
 	FSpaceNav3DController(const TSharedRef< FGenericApplicationMessageHandler >& InMessageHandler)
-		: MessageHandler(InMessageHandler), bNewEvent(false), m_DevHdl(NULL)
+		: FSpaceNav3DControllerBase(InMessageHandler), bNewEvent(false), m_DevHdl(NULL)
 	{
 		UE_LOG(LogSpaceNav3DController, Display, TEXT("Input Device creation"));
 		// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
@@ -54,15 +94,10 @@ public:
 			UE_LOG(LogSpaceNav3DController, Error, TEXT("Could not open the Space Navigator"));
 			return;
 		}
-
-		FMemory::Memzero(&ControllerState, sizeof(ControllerState));
-		FMemory::Memzero(&PrevControllerState, sizeof(PrevControllerState));
-
+		
 		mouse_handler.controller = this;
-		TSharedPtr<GenericApplication> GenericApplication = FSlateApplication::Get().GetPlatformApplication();
 		FWindowsApplication* WindowsApplication = (FWindowsApplication*)GenericApplication.Get();
 		WindowsApplication->AddMessageHandler(mouse_handler);
-
 	}
 #if 0 // seems to crash for some reason
 	~FSpaceNav3DController()
@@ -76,10 +111,6 @@ public:
 		}
 	}
 #endif
-	virtual void SetMessageHandler(const TSharedRef< FGenericApplicationMessageHandler >& InMessageHandler) override
-	{
-		MessageHandler = InMessageHandler;
-	}
 	virtual void Tick(float DeltaTime) override
 	{
 	}
@@ -171,38 +202,12 @@ public:
 		}
 	}
 
-
-	virtual bool Exec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar) override { return false; }
-
-	/**
-	* IForceFeedbackSystem pass through functions
-	*/
-	virtual void SetChannelValue(int32 ControllerId, FForceFeedbackChannelType ChannelType, float Value) override {}
-	virtual void SetChannelValues(int32 ControllerId, const FForceFeedbackValues &values) override {}
-
 public:
 	HWND m_hwnd;		// UE main window
 	SiHdl m_DevHdl;		// Handle to 3D mouse Device
 	bool bNewEvent;
 
-	struct F3DState {
-		float LeftAnalogX;
-		float LeftAnalogY;
-		float RightAnalogX;
-		float RightAnalogY;
-		float LeftTriggerAnalog;
-		float RightTriggerAnalog;
-		float RollAnalog;
-		int cmd;
-		// 3D connexion SDK buttons, 0 = none
-		int   button_pressed;
-		int   button_released;
-	} ControllerState, PrevControllerState;
-
 	FSpaceNav3DMessageHandler mouse_handler; // 3D mouse events sent to UE window
-
-	/** handler to send all messages to */
-	TSharedRef<FGenericApplicationMessageHandler> MessageHandler;
 };
 
 static float LongToNormalizedFloat(long AxisVal)
@@ -316,15 +321,64 @@ bool FSpaceNav3DMessageHandler::ProcessMessage(HWND hwnd, uint32 msg, WPARAM wPa
 	return false; // nope, wasn't us
 }
 
+#elif PLATFORM_MAC // PLATFORM_WINDOWS
+
+class FSpaceNav3DController : public FSpaceNav3DControllerBase
+{
+public:
+	
+	FSpaceNav3DController(const TSharedRef< FGenericApplicationMessageHandler >& InMessageHandler)
+	: FSpaceNav3DControllerBase(InMessageHandler)
+	{
+	}
+	
+	virtual void Tick( float DeltaTime )
+	{
+	}
+	
+	/** Poll for controller state and send events if needed */
+	virtual void SendControllerEvents()
+	{
+	}
+};
+
+#endif
+
 class FSpaceNav3DModule : public IInputDeviceModule
 {
 	virtual TSharedPtr< class IInputDevice > CreateInputDevice(const TSharedRef< FGenericApplicationMessageHandler >& InMessageHandler) override
 	{
+		UE_LOG(LogSpaceNav3DController, Warning, TEXT("BlankInputDevicePlugin Created!"));
 		return TSharedPtr< class IInputDevice >(new FSpaceNav3DController(InMessageHandler));
+	}
+	
+	virtual void StartupModule() override
+	{
+		// This code will execute after your module is loaded into memory (but after global variables are initialized, of course.)
+		// Custom module-specific init can go here.
+		
+		UE_LOG(LogTemp, Warning, TEXT("BlankInputDevicePlugin initiated!"));
+		
+		// IMPORTANT: This line registers our input device module with the engine.
+		//	      If we do not register the input device module with the engine,
+		//	      the engine won't know about our existence. Which means
+		//	      CreateInputDevice never gets called, which means the engine
+		//	      will never try to poll for events from our custom input device.
+		IModularFeatures::Get().RegisterModularFeature(IInputDeviceModule::GetModularFeatureName(), this);
+	}
+	
+	
+	virtual void ShutdownModule() override
+	{
+		// This function may be called during shutdown to clean up your module.  For modules that support dynamic reloading,
+		// we call this function before unloading the module.
+		
+		UE_LOG(LogSpaceNav3DController, Warning, TEXT("BlankInputDevicePlugin shut down!"));
+		
+		// Unregister our input device module
+		IModularFeatures::Get().UnregisterModularFeature(IInputDeviceModule::GetModularFeatureName(), this);
 	}
 };
 
 IMPLEMENT_MODULE(FSpaceNav3DModule, SpaceNav3D)
 
-
-#endif

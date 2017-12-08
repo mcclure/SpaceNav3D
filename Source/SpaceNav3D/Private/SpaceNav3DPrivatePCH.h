@@ -4,8 +4,13 @@
 #include "IInputInterface.h"
 #include "IInputDevice.h"
 #include "SlateBasics.h"
+
+#ifdef _WIN32
 #include "WindowsApplication.h"
+#endif
+
 #include "Engine/World.h"
+
 #if WITH_EDITOR
 #include "Editor/EditorEngine.h"
 #include "SEditorViewport.h"
@@ -13,6 +18,7 @@
 #include "EditorViewportCommands.h"
 #endif
 
+#ifdef _WIN32
 #include "AllowWindowsPlatformTypes.h"
 #include "si.h"
 #include "spwmacro.h"  /* Common macros used by 3DxWare SDK functions. */
@@ -22,6 +28,7 @@ extern "C"
 }
 #include "V3DCMD.h"
 #include "HideWindowsPlatformTypes.h"
+#endif
 
 #include "ISpaceNav3DPlugin.h"
 

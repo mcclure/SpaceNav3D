@@ -107,24 +107,28 @@ public class SpaceNav3D : ModuleRules
      */
     private bool Load3DxWareSDK(ReadOnlyTargetRules Target)
     {
-        // Test for compatability
-        if (!(Target.Platform == UnrealTargetPlatform.Win64) && !(Target.Platform == UnrealTargetPlatform.Win32))
+        // Windows specific framework loading
+        if (Target.Platform == UnrealTargetPlatform.Win64 || Target.Platform == UnrealTargetPlatform.Win32)
         {
-            return false;
-        }
+			// Build SDK path
+			string PlatformString = (Target.Platform == UnrealTargetPlatform.Win64) ? "x64" : "x86";
+			string ThreeDeexWareSDKDir = Path.Combine(ThirdPartyPath, "3DxWare SDK");
 
-        // Build SDK path
-        string PlatformString = (Target.Platform == UnrealTargetPlatform.Win64) ? "x64" : "x86";
-        string ThreeDeexWareSDKDir = Path.Combine(ThirdPartyPath, "3DxWare SDK");
+			// Add .libs
+			PublicLibraryPaths.Add(Path.Combine(ThreeDeexWareSDKDir, "Lib", PlatformString));
+			PublicAdditionalLibraries.Add("siapp.lib");
 
-        // Add .libs
-        PublicLibraryPaths.Add(Path.Combine(ThreeDeexWareSDKDir, "Lib", PlatformString));
-        PublicAdditionalLibraries.Add("siapp.lib");
+			// Add include paths
+			PublicIncludePaths.Add(Path.Combine(ThreeDeexWareSDKDir, "Inc"));
+			PrivateIncludePathModuleNames.Add("TargetPlatform");
 
-        // Add include paths
-        PublicIncludePaths.Add(Path.Combine(ThreeDeexWareSDKDir, "Inc"));
-        PrivateIncludePathModuleNames.Add("TargetPlatform");
+		// Mac specific framework loading
+		} else if (Target.Platform != UnrealTargetPlatform.Mac) {
+			// TODO
 
+		} else { // Linux or other unsupported platform
+			return false;
+		}
         return true;
     }
 }
