@@ -323,15 +323,49 @@ bool FSpaceNav3DMessageHandler::ProcessMessage(HWND hwnd, uint32 msg, WPARAM wPa
 
 #elif PLATFORM_MAC // PLATFORM_WINDOWS
 
+static void	StaticDeviceAddedHandler	(unsigned int connection) {}
+static void	StaticDeviceRemovedHandler	(unsigned int connection) {}
+static void	StaticMessageHandler		(unsigned int connection, natural_t messageType, void *messageArgument);
+
 class FSpaceNav3DController : public FSpaceNav3DControllerBase
 {
 public:
+    UInt16 connexionClient;
+    static FSpaceNav3DController *singleton; // FIXME: Could I use Get() instead for this?
 	
 	FSpaceNav3DController(const TSharedRef< FGenericApplicationMessageHandler >& InMessageHandler)
 	: FSpaceNav3DControllerBase(InMessageHandler)
 	{
+		UE_LOG(LogSpaceNav3DController, Display, TEXT("Input Device creation"));
+		
+		OSErr result = SetConnexionHandlers(StaticMessageHandler, StaticDeviceAddedHandler, StaticDeviceRemovedHandler, false); // No separate thread for now
+        if (result)
+            UE_LOG(LogSpaceNav3DController, Warning, TEXT("Failed to register with 3Dconnexion API!"));
+        
+        if (singleton)
+            UE_LOG(LogSpaceNav3DController, Warning, TEXT("Multiple copies of plugin runing at once?!"));
+        singleton = this;
+        
+        unsigned char appName[12] = "\pSpaceNav3D"; // Apparently \p is a nonstandard code to generate a pascal string?!
+        connexionClient = RegisterConnexionClient('MCTt', appName,
+                                                  kConnexionClientModeTakeOver, kConnexionMaskAll);
+        SetConnexionClientButtonMask(connexionClient, kConnexionMaskAllButtons);
 	}
-	
+    
+    ~FSpaceNav3DController() {
+        singleton = NULL;
+        UnregisterConnexionClient(connexionClient);
+    }
+
+    virtual void MessageHandler(natural_t messageType, ConnexionDeviceState *state)
+    {
+        switch (messageType)
+        {
+            case kConnexionMsgDeviceState:
+                break;
+        }
+    }
+    
 	virtual void Tick( float DeltaTime )
 	{
 	}
@@ -342,6 +376,14 @@ public:
 	}
 };
 
+FSpaceNav3DController *FSpaceNav3DController::singleton = NULL;
+
+void    StaticMessageHandler        (unsigned int connection, natural_t messageType, void *messageArgument) {
+    ConnexionDeviceState        *state = (ConnexionDeviceState *)messageArgument;
+    if (FSpaceNav3DController::singleton && FSpaceNav3DController::singleton->connexionClient == connection)
+        FSpaceNav3DController::singleton->MessageHandler(messageType, (ConnexionDeviceState *)messageArgument);
+}
+
 #endif
 
 class FSpaceNav3DModule : public IInputDeviceModule
@@ -350,33 +392,6 @@ class FSpaceNav3DModule : public IInputDeviceModule
 	{
 		UE_LOG(LogSpaceNav3DController, Warning, TEXT("BlankInputDevicePlugin Created!"));
 		return TSharedPtr< class IInputDevice >(new FSpaceNav3DController(InMessageHandler));
-	}
-	
-	virtual void StartupModule() override
-	{
-		// This code will execute after your module is loaded into memory (but after global variables are initialized, of course.)
-		// Custom module-specific init can go here.
-		
-		UE_LOG(LogTemp, Warning, TEXT("BlankInputDevicePlugin initiated!"));
-		
-		// IMPORTANT: This line registers our input device module with the engine.
-		//	      If we do not register the input device module with the engine,
-		//	      the engine won't know about our existence. Which means
-		//	      CreateInputDevice never gets called, which means the engine
-		//	      will never try to poll for events from our custom input device.
-		IModularFeatures::Get().RegisterModularFeature(IInputDeviceModule::GetModularFeatureName(), this);
-	}
-	
-	
-	virtual void ShutdownModule() override
-	{
-		// This function may be called during shutdown to clean up your module.  For modules that support dynamic reloading,
-		// we call this function before unloading the module.
-		
-		UE_LOG(LogSpaceNav3DController, Warning, TEXT("BlankInputDevicePlugin shut down!"));
-		
-		// Unregister our input device module
-		IModularFeatures::Get().UnregisterModularFeature(IInputDeviceModule::GetModularFeatureName(), this);
 	}
 };
 

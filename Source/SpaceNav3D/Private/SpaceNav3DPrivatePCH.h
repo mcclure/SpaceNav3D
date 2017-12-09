@@ -28,6 +28,13 @@ extern "C"
 }
 #include "V3DCMD.h"
 #include "HideWindowsPlatformTypes.h"
+
+#elif PLATFORM_MAC
+
+// FIXME: Paths should be prefixed with 3DconnexionClient/. See note about frameworks in build.cs
+#include <ConnexionClient.h>
+#include <ConnexionClientAPI.h>
+
 #endif
 
 #include "ISpaceNav3DPlugin.h"

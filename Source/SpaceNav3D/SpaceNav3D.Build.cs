@@ -123,8 +123,22 @@ public class SpaceNav3D : ModuleRules
 			PrivateIncludePathModuleNames.Add("TargetPlatform");
 
 		// Mac specific framework loading
-		} else if (Target.Platform != UnrealTargetPlatform.Mac) {
-			// TODO
+		} else if (Target.Platform == UnrealTargetPlatform.Mac) {
+			PublicFrameworks.AddRange(
+                new string[]
+                {
+                    "/Library/Frameworks/3DconnexionClient.framework" // Will load /Library/Frameworks/3DconnexionClient.framework
+                }
+            );
+
+            // FIXME: Adding a Framework in OS X is supposed to add its headers also. This next bit should be unnecessary.
+            // Either this code is doing something wrong, or there is a bug in Framework handling in Unreal.
+            PublicSystemIncludePaths.AddRange(
+                new string[]
+                {
+                    "/Library/Frameworks/3DconnexionClient.framework/Headers"
+                }
+            );
 
 		} else { // Linux or other unsupported platform
 			return false;
