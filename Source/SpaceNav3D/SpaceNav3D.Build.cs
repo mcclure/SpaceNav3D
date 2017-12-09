@@ -18,7 +18,7 @@ public class SpaceNav3D : ModuleRules
     }
 
     public SpaceNav3D(ReadOnlyTargetRules Target) : base(Target)
-	{
+    {
         // tanis - start faster compile time for small projects
         MinFilesUsingPrecompiledHeaderOverride = 1;
         bFasterWithoutUnity = true;
@@ -110,21 +110,21 @@ public class SpaceNav3D : ModuleRules
         // Windows specific framework loading
         if (Target.Platform == UnrealTargetPlatform.Win64 || Target.Platform == UnrealTargetPlatform.Win32)
         {
-			// Build SDK path
-			string PlatformString = (Target.Platform == UnrealTargetPlatform.Win64) ? "x64" : "x86";
-			string ThreeDeexWareSDKDir = Path.Combine(ThirdPartyPath, "3DxWare SDK");
+            // Build SDK path
+            string PlatformString = (Target.Platform == UnrealTargetPlatform.Win64) ? "x64" : "x86";
+            string ThreeDeexWareSDKDir = Path.Combine(ThirdPartyPath, "3DxWare SDK");
 
-			// Add .libs
-			PublicLibraryPaths.Add(Path.Combine(ThreeDeexWareSDKDir, "Lib", PlatformString));
-			PublicAdditionalLibraries.Add("siapp.lib");
+            // Add .libs
+            PublicLibraryPaths.Add(Path.Combine(ThreeDeexWareSDKDir, "Lib", PlatformString));
+            PublicAdditionalLibraries.Add("siapp.lib");
 
-			// Add include paths
-			PublicIncludePaths.Add(Path.Combine(ThreeDeexWareSDKDir, "Inc"));
-			PrivateIncludePathModuleNames.Add("TargetPlatform");
+            // Add include paths
+            PublicIncludePaths.Add(Path.Combine(ThreeDeexWareSDKDir, "Inc"));
+            PrivateIncludePathModuleNames.Add("TargetPlatform");
 
-		// Mac specific framework loading
-		} else if (Target.Platform == UnrealTargetPlatform.Mac) {
-			PublicFrameworks.AddRange(
+        // Mac specific framework loading
+        } else if (Target.Platform == UnrealTargetPlatform.Mac) {
+            PublicFrameworks.AddRange(
                 new string[]
                 {
                     "/Library/Frameworks/3DconnexionClient.framework" // Will load /Library/Frameworks/3DconnexionClient.framework
@@ -140,9 +140,9 @@ public class SpaceNav3D : ModuleRules
                 }
             );
 
-		} else { // Linux or other unsupported platform
-			return false;
-		}
+        } else { // Linux or other unsupported platform
+            return false;
+        }
         return true;
     }
 }
