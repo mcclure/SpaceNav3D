@@ -31,7 +31,10 @@ public:
 		int   button_pressed;
 		int   button_released;
 	} ControllerState, PrevControllerState;
-	
+
+    /* Was new data received from the device? */
+    bool bNewEvent;
+
 	/** handler to send all messages to */
 	TSharedRef<FGenericApplicationMessageHandler> MessageHandler;
 
@@ -40,11 +43,122 @@ public:
 		MessageHandler = InMessageHandler;
 	}
 	
+    virtual void Tick(float DeltaTime) override
+    {
+    }
+    
+    float AdjustedControllerValue(const float controllerValueInitial, const float SMDeadZone, const float linearPercent, const float multiplication)
+    {
+        float DeadZone = 0.2f - SMDeadZone; //UE4 deadzone minus the desired deadzone
+        float controllerValue;
+        controllerValue = (((controllerValueInitial > 0) ? 1.0f : -1.0f) * controllerValueInitial * controllerValueInitial * (1.0f - linearPercent) + controllerValueInitial * linearPercent) * multiplication / 2.0f;
+        if (controllerValueInitial > SMDeadZone)
+            controllerValue = controllerValue + DeadZone;
+        else if (controllerValueInitial < -SMDeadZone)
+            controllerValue = controllerValue - DeadZone;
+        return controllerValue;
+    }
+    
+    virtual void SendControllerEvents() override
+    {
+        if (bNewEvent) {
+            bNewEvent = false;
+            MessageHandler->OnControllerAnalog(FGamepadKeyNames::LeftAnalogX, 0, AdjustedControllerValue(ControllerState.LeftAnalogX, 0.05f, 0.3f, 1.0f));
+            MessageHandler->OnControllerAnalog(FGamepadKeyNames::LeftAnalogY, 0, AdjustedControllerValue(ControllerState.LeftAnalogY, 0.05f, 0.3f, 1.0f));
+            MessageHandler->OnControllerAnalog(FGamepadKeyNames::RightAnalogX, 0, AdjustedControllerValue(ControllerState.RightAnalogX, 0.05f, 0.6f, 1.5f)); //I prefer it more linear
+            MessageHandler->OnControllerAnalog(FGamepadKeyNames::RightAnalogY, 0, AdjustedControllerValue(ControllerState.RightAnalogY, 0.05f, 0.3f, 1.0f));
+            MessageHandler->OnControllerAnalog(FGamepadKeyNames::LeftTriggerAnalog, 0, AdjustedControllerValue(ControllerState.LeftTriggerAnalog, 0.05f, 0.3f, 1.0f));
+            MessageHandler->OnControllerAnalog(FGamepadKeyNames::RightTriggerAnalog, 0, AdjustedControllerValue(ControllerState.RightTriggerAnalog, 0.05f, 0.3f, 1.0f));
+            MessageHandler->OnControllerAnalog(FGamepadKeyNames::MotionController_Left_Thumbstick_X, 0, ControllerState.RollAnalog); // roll
+            
+            // buttons
+#if WITH_EDITOR && PLATFORM_WINDOWS
+            UEditorEngine *EEngine = Cast<UEditorEngine>(GEngine);
+            FEditorViewportClient* ViewportClient = NULL;
+            int32 ViewIndex;
+            for (ViewIndex = 0; ViewIndex < EEngine->AllViewportClients.Num(); ++ViewIndex)
+            {
+                ViewportClient = EEngine->AllViewportClients[ViewIndex];
+                if (ViewportClient && ViewportClient->Viewport->HasFocus()) {
+                    //UE_LOG(LogSpaceNav3DController, Display, TEXT("Viewport %d has focus"), ViewIndex);
+                    break;
+                }
+            }
+            
+            if ( (ViewIndex < EEngine->AllViewportClients.Num()) && ViewportClient) {
+                const FUIAction* Action = NULL;
+                switch (ControllerState.cmd) {
+                    case V3DCMD_VIEW_FIT:
+                        Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().FocusViewportToSelection);
+                        break;
+                    case V3DCMD_VIEW_FRONT:
+                        Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Front);
+                        break;
+                    case V3DCMD_VIEW_BACK:
+                        Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Back);
+                        break;
+                    case V3DCMD_VIEW_TOP:
+                        Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Top);
+                        break;
+                    case V3DCMD_VIEW_LEFT:
+                        Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Left);
+                        break;
+                    case V3DCMD_VIEW_RIGHT:
+                        Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Right);
+                        break;
+                    case V3DCMD_VIEW_BOTTOM:
+                        Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Bottom);
+                        break;
+                    case V3DCMD_VIEW_ISO1:
+                        Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Perspective);
+                        break;
+                    case V3DCMD_VIEW_ISO2:
+                        Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Perspective);
+                        if (Action)
+                            Action->Execute();
+                        Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().LitMode);
+                        //Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Next);
+                        break;
+                    default:
+                        break;
+                }
+                if (Action)
+                    Action->Execute();
+                
+                // reset the button states
+                ControllerState.cmd = 0;
+                ControllerState.button_pressed = 0;
+                ControllerState.button_released = 0;
+            }
+#endif // WITH_EDITOR
+        }
+    }
+    
 	// Unused but mandatory IInputDevice methods
 	virtual bool Exec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar) override { return false; }
 	virtual void SetChannelValue(int32 ControllerId, FForceFeedbackChannelType ChannelType, float Value) override {}
 	virtual void SetChannelValues(int32 ControllerId, const FForceFeedbackValues &values) override {}
 };
+
+static float LongToNormalizedFloat(long AxisVal)
+{
+    // normalize [-32768..32767] -> [-1..1]
+    const float Norm = (AxisVal <= 0 ? 2100.f : 2100.f);
+    float prenorm = float(AxisVal) / Norm;
+    
+    if (prenorm == 0.0)
+        return 0.0;
+    
+    prenorm *= 0.8;
+    
+    if (GIsEditor && !GWorld->HasBegunPlay())
+    {
+        // scale (0,1] into [0.2,1] range to get around hardcoded deadzone in editor
+        return prenorm + (AxisVal <= 0 ? -0.2f : 0.2f);
+    }
+    
+    return 3.0*prenorm + (AxisVal <= 0 ? -0.2f : 0.2f);
+}
 
 #if PLATFORM_WINDOWS
 
@@ -111,124 +225,13 @@ public:
 		}
 	}
 #endif
-	virtual void Tick(float DeltaTime) override
-	{
-	}
-
-	float AdjustedControllerValue(const float controllerValueInitial, const float SMDeadZone, const float linearPercent, const float multiplication)
-	{
-		float DeadZone = 0.2f - SMDeadZone; //UE4 deadzone minus the desired deadzone
-		float controllerValue;
-		controllerValue = (((controllerValueInitial > 0) ? 1.0f : -1.0f) * controllerValueInitial * controllerValueInitial * (1.0f - linearPercent) + controllerValueInitial * linearPercent) * multiplication / 2.0f;
-		if (controllerValueInitial > SMDeadZone)
-			controllerValue = controllerValue + DeadZone;
-		else if (controllerValueInitial < -SMDeadZone)
-			controllerValue = controllerValue - DeadZone;
-		return controllerValue;
-	}
-
-	virtual void SendControllerEvents() override
-	{
-		if (bNewEvent) {
-			bNewEvent = false;
-			MessageHandler->OnControllerAnalog(FGamepadKeyNames::LeftAnalogX, 0, AdjustedControllerValue(ControllerState.LeftAnalogX, 0.05f, 0.3f, 1.0f));
-			MessageHandler->OnControllerAnalog(FGamepadKeyNames::LeftAnalogY, 0, AdjustedControllerValue(ControllerState.LeftAnalogY, 0.05f, 0.3f, 1.0f));
-			MessageHandler->OnControllerAnalog(FGamepadKeyNames::RightAnalogX, 0, AdjustedControllerValue(ControllerState.RightAnalogX, 0.05f, 0.6f, 1.5f)); //I prefer it more linear
-			MessageHandler->OnControllerAnalog(FGamepadKeyNames::RightAnalogY, 0, AdjustedControllerValue(ControllerState.RightAnalogY, 0.05f, 0.3f, 1.0f));
-			MessageHandler->OnControllerAnalog(FGamepadKeyNames::LeftTriggerAnalog, 0, AdjustedControllerValue(ControllerState.LeftTriggerAnalog, 0.05f, 0.3f, 1.0f));
-			MessageHandler->OnControllerAnalog(FGamepadKeyNames::RightTriggerAnalog, 0, AdjustedControllerValue(ControllerState.RightTriggerAnalog, 0.05f, 0.3f, 1.0f));
-			MessageHandler->OnControllerAnalog(FGamepadKeyNames::MotionController_Left_Thumbstick_X, 0, ControllerState.RollAnalog); // roll
-
-			// buttons
-#if WITH_EDITOR
-			UEditorEngine *EEngine = Cast<UEditorEngine>(GEngine);
-			FEditorViewportClient* ViewportClient = NULL;
-			int32 ViewIndex;
-			for (ViewIndex = 0; ViewIndex < EEngine->AllViewportClients.Num(); ++ViewIndex)
-			{
-				ViewportClient = EEngine->AllViewportClients[ViewIndex];
-				if (ViewportClient && ViewportClient->Viewport->HasFocus()) {
-					//UE_LOG(LogSpaceNav3DController, Display, TEXT("Viewport %d has focus"), ViewIndex);
-					break;
-				}
-			}
-					
-			if ( (ViewIndex < EEngine->AllViewportClients.Num()) && ViewportClient) {
-				const FUIAction* Action = NULL;
-				switch (ControllerState.cmd) {
-				case V3DCMD_VIEW_FIT:
-					Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().FocusViewportToSelection);
-					break;
-				case V3DCMD_VIEW_FRONT:
-					Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Front);
-					break;
-				case V3DCMD_VIEW_BACK:
-					Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Back);
-					break;
-				case V3DCMD_VIEW_TOP:
-					Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Top);
-					break;
-				case V3DCMD_VIEW_LEFT:
-					Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Left);
-					break;
-				case V3DCMD_VIEW_RIGHT:
-					Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Right);
-					break;
-				case V3DCMD_VIEW_BOTTOM:
-					Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Bottom);
-					break;
-				case V3DCMD_VIEW_ISO1:
-					Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Perspective);
-					break;
-				case V3DCMD_VIEW_ISO2:
-					Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Perspective);
-					if (Action)
-						Action->Execute();
-					Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().LitMode);
-					//Action = ViewportClient->GetEditorViewportWidget()->GetCommandList()->GetActionForCommand(FEditorViewportCommands::Get().Next);
-					break;
-				default:
-					break;
-				}
-				if (Action)
-					Action->Execute();
-
-				// reset the button states
-				ControllerState.cmd = 0;
-				ControllerState.button_pressed = 0;
-				ControllerState.button_released = 0;
-			}
-#endif // WITH_EDITOR
-		}
-	}
 
 public:
 	HWND m_hwnd;		// UE main window
 	SiHdl m_DevHdl;		// Handle to 3D mouse Device
-	bool bNewEvent;
 
 	FSpaceNav3DMessageHandler mouse_handler; // 3D mouse events sent to UE window
 };
-
-static float LongToNormalizedFloat(long AxisVal)
-{
-	// normalize [-32768..32767] -> [-1..1]
-	const float Norm = (AxisVal <= 0 ? 2100.f : 2100.f);
-	float prenorm = float(AxisVal) / Norm;
-
-	if (prenorm == 0.0)
-		return 0.0;
-
-	prenorm *= 0.8;
-
-	if (GIsEditor && !GWorld->HasBegunPlay())
-	{
-		// scale (0,1] into [0.2,1] range to get around hardcoded deadzone in editor
-		return prenorm + (AxisVal <= 0 ? -0.2f : 0.2f);
-	}
-
-	return 3.0*prenorm + (AxisVal <= 0 ? -0.2f : 0.2f);
-}
 
 bool FSpaceNav3DMessageHandler::ProcessMessage(HWND hwnd, uint32 msg, WPARAM wParam, LPARAM lParam, int32& OutResult)
 {
@@ -323,6 +326,10 @@ bool FSpaceNav3DMessageHandler::ProcessMessage(HWND hwnd, uint32 msg, WPARAM wPa
 
 #elif PLATFORM_MAC // PLATFORM_WINDOWS
 
+enum {
+  SI_TX = 0, SI_TY, SI_TZ, SI_RX, SI_RY, SI_RZ
+};
+
 static void	StaticDeviceAddedHandler	(unsigned int connection) {}
 static void	StaticDeviceRemovedHandler	(unsigned int connection) {}
 static void	StaticMessageHandler		(unsigned int connection, natural_t messageType, void *messageArgument);
@@ -334,11 +341,11 @@ public:
     static FSpaceNav3DController *singleton; // FIXME: Could I use Get() instead for this?
 	
 	FSpaceNav3DController(const TSharedRef< FGenericApplicationMessageHandler >& InMessageHandler)
-	: FSpaceNav3DControllerBase(InMessageHandler)
+	: FSpaceNav3DControllerBase(InMessageHandler), connexionClient(0)
 	{
 		UE_LOG(LogSpaceNav3DController, Display, TEXT("Input Device creation"));
 		
-		OSErr result = SetConnexionHandlers(StaticMessageHandler, StaticDeviceAddedHandler, StaticDeviceRemovedHandler, false); // No separate thread for now
+		OSErr result = SetConnexionHandlers(StaticMessageHandler, StaticDeviceAddedHandler, StaticDeviceRemovedHandler, false);
         if (result)
             UE_LOG(LogSpaceNav3DController, Warning, TEXT("Failed to register with 3Dconnexion API!"));
         
@@ -347,7 +354,7 @@ public:
         singleton = this;
         
         unsigned char appName[12] = "\pSpaceNav3D"; // Apparently \p is a nonstandard code to generate a pascal string?!
-        connexionClient = RegisterConnexionClient('MCTt', appName,
+        connexionClient = RegisterConnexionClient('UNRL', appName,
                                                   kConnexionClientModeTakeOver, kConnexionMaskAll);
         SetConnexionClientButtonMask(connexionClient, kConnexionMaskAllButtons);
 	}
@@ -359,19 +366,34 @@ public:
 
     virtual void MessageHandler(natural_t messageType, ConnexionDeviceState *state)
     {
+        FSpaceNav3DController *controller = this;
+        
         switch (messageType)
         {
-            case kConnexionMsgDeviceState:
-                break;
+            case kConnexionMsgDeviceState: {
+                controller->ControllerState.LeftAnalogX = LongToNormalizedFloat(state->axis[SI_TX]); // pan left/right
+                controller->ControllerState.LeftAnalogY = LongToNormalizedFloat(state->axis[SI_TZ]); // pan forward/backward
+                controller->ControllerState.RightAnalogX = -LongToNormalizedFloat(state->axis[SI_RY]); // rotate left/right
+                controller->ControllerState.RightAnalogY = LongToNormalizedFloat(state->axis[SI_RX]);  // rotate up/down
+                
+                if (!GIsEditor) // really weird to allow roll in editor, so we won't!
+                    controller->ControllerState.RollAnalog = LongToNormalizedFloat(state->axis[SI_RZ]);  // rotate up/down
+                
+                if (state->axis[SI_TZ] >= 0) {
+                    controller->ControllerState.LeftTriggerAnalog = -LongToNormalizedFloat(state->axis[SI_TY]);
+                    controller->ControllerState.RightTriggerAnalog = 0.0;
+                }
+                else if (state->axis[SI_TZ] < 0) {
+                    controller->ControllerState.RightTriggerAnalog = LongToNormalizedFloat(state->axis[SI_TY]);
+                    controller->ControllerState.LeftTriggerAnalog = 0.0;
+                }
+                
+                controller->bNewEvent = true;
+            } break;
         }
     }
     
 	virtual void Tick( float DeltaTime )
-	{
-	}
-	
-	/** Poll for controller state and send events if needed */
-	virtual void SendControllerEvents()
 	{
 	}
 };
@@ -379,8 +401,10 @@ public:
 FSpaceNav3DController *FSpaceNav3DController::singleton = NULL;
 
 void    StaticMessageHandler        (unsigned int connection, natural_t messageType, void *messageArgument) {
-    ConnexionDeviceState        *state = (ConnexionDeviceState *)messageArgument;
-    if (FSpaceNav3DController::singleton && FSpaceNav3DController::singleton->connexionClient == connection)
+//    UE_LOG(LogSpaceNav3DController, Display, TEXT("Message callback %p %d %d message %d"), FSpaceNav3DController::singleton, FSpaceNav3DController::singleton?(int)FSpaceNav3DController::singleton->connexionClient:NULL,(int)connection, (int) messageType);
+    
+    // TODO: Ensure FSpaceNav3DController::singleton->connexionClient == connection
+    if (FSpaceNav3DController::singleton)
         FSpaceNav3DController::singleton->MessageHandler(messageType, (ConnexionDeviceState *)messageArgument);
 }
 
@@ -390,7 +414,6 @@ class FSpaceNav3DModule : public IInputDeviceModule
 {
 	virtual TSharedPtr< class IInputDevice > CreateInputDevice(const TSharedRef< FGenericApplicationMessageHandler >& InMessageHandler) override
 	{
-		UE_LOG(LogSpaceNav3DController, Warning, TEXT("BlankInputDevicePlugin Created!"));
 		return TSharedPtr< class IInputDevice >(new FSpaceNav3DController(InMessageHandler));
 	}
 };
